@@ -5,8 +5,43 @@ const crypto = require('crypto');
 
 const VERIFICATION_TOKEN = 'mK9xQ3nP7rT2wV6yJ4hD8fA5bN1cL0eG7uZ';
 const ENDPOINT_URL = 'https://ebay-endpoint-fsjm.onrender.com';
+const CLIENT_ID = process.env.EBAY_CLIENT_ID;
+const CLIENT_SECRET = process.env.EBAY_CLIENT_SECRET;
 
-http.createServer((req, res) => {
+let cachedToken = null;
+let tokenExpiry = 0;
+
+async function getToken() {
+  if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
+  const credentials = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64');
+  return new Promise((resolve, reject) => {
+    const body = 'grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope';
+    const req = https.request({
+      hostname: 'api.ebay.com',
+      path: '/identity/v1/oauth2/token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${credentials}`,
+        'Content-Length': Buffer.byteLength(body)
+      }
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        const json = JSON.parse(data);
+        cachedToken = json.access_token;
+        tokenExpiry = Date.now() + (json.expires_in - 60) * 1000;
+        resolve(cachedToken);
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -14,25 +49,44 @@ http.createServer((req, res) => {
 
   const parsed = url.parse(req.url, true);
 
-  if (parsed.pathname === '/ebay') {
-    const query = new URLSearchParams(parsed.query).toString();
-    const ebayUrl = `https://svcs.ebay.com/services/search/FindingService/v1?${query}`;
-    https.get(ebayUrl, (ebayRes) => {
-      let data = '';
-      ebayRes.on('data', chunk => data += chunk);
-      ebayRes.on('end', () => {
-        res.writeHead(200, {'Content-Type': 'application/json'});
-        res.end(data);
+  if (parsed.pathname === '/browse') {
+    try {
+      const token = await getToken();
+      const query = parsed.query;
+      const params = new URLSearchParams({
+        q: query.q || '',
+        category_ids: '214',
+        sort: 'newlyListed',
+        limit: query.limit || '25',
+        filter: query.filter || ''
       });
-    }).on('error', (e) => {
+      const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
+      https.get(ebayUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-EBAY-C-MARKETPLACE-ID': query.marketplace || 'EBAY_US',
+          'Content-Type': 'application/json'
+        }
+      }, (ebayRes) => {
+        let data = '';
+        ebayRes.on('data', chunk => data += chunk);
+        ebayRes.on('end', () => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(data);
+        });
+      }).on('error', (e) => {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: e.message }));
+      });
+    } catch (e) {
       res.writeHead(500);
       res.end(JSON.stringify({ error: e.message }));
-    });
+    }
   } else if (parsed.query.challenge_code) {
     const hash = crypto.createHash('sha256')
       .update(parsed.query.challenge_code + VERIFICATION_TOKEN + ENDPOINT_URL)
       .digest('hex');
-    res.writeHead(200, {'Content-Type': 'application/json'});
+    res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ challengeResponse: hash }));
   } else {
     res.writeHead(200);
