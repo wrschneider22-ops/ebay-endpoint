@@ -53,13 +53,24 @@ http.createServer(async (req, res) => {
     try {
       const token = await getToken();
       const query = parsed.query;
-      const params = new URLSearchParams({
-        q: query.q || '',
-        category_ids: '214',
-        sort: 'newlyListed',
-        limit: query.limit || '25',
-        filter: query.filter || ''
-      });
+      const filterParts = [];
+if (query.minPrice && query.maxPrice) {
+  filterParts.push(`price:[${query.minPrice}..${query.maxPrice}]`);
+  filterParts.push(`priceCurrency:${query.currency || 'USD'}`);
+}
+if (query.buyingOptions) filterParts.push(`buyingOptions:{${query.buyingOptions}}`);
+if (query.conditions) filterParts.push(`conditions:{${query.conditions}}`);
+if (query.itemLocationCountry) filterParts.push(`itemLocationCountry:${query.itemLocationCountry}`);
+if (query.freeShipping === 'true') filterParts.push('maxDeliveryCost:0');
+if (query.returnsAccepted === 'true') filterParts.push('returnsAccepted:true');
+
+const params = new URLSearchParams({
+  q: query.q || '',
+  category_ids: '214',
+  sort: 'newlyListed',
+  limit: query.limit || '25',
+  filter: filterParts.join(',')
+});
       const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
       https.get(ebayUrl, {
         headers: {
