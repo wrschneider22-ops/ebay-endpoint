@@ -75,7 +75,7 @@ http.createServer(async (req, res) => {
       const maxPrice = parsed.query.maxPrice || '';
       const params = new URLSearchParams({
         _nkw: q,
-        _sacat: '214',
+        _sacat: '212',
         _sop: '10',
         _rss: '1'
       });
@@ -110,7 +110,7 @@ http.createServer(async (req, res) => {
       if (query.returnsAccepted === 'true') filterParts.push('returnsAccepted:true');
       const params = new URLSearchParams({
         q: query.q || '',
-        category_ids: '214',
+        category_ids: '212',
         sort: 'newlyListed',
         limit: query.limit || '25',
         filter: filterParts.join(',')
