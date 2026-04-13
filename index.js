@@ -29,15 +29,34 @@ async function getToken() {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
-        const json = JSON.parse(data);
-        cachedToken = json.access_token;
-        tokenExpiry = Date.now() + (json.expires_in - 60) * 1000;
-        resolve(cachedToken);
+        try {
+          const json = JSON.parse(data);
+          cachedToken = json.access_token;
+          tokenExpiry = Date.now() + (json.expires_in - 60) * 1000;
+          resolve(cachedToken);
+        } catch(e) { reject(e); }
       });
     });
     req.on('error', reject);
     req.write(body);
     req.end();
+  });
+}
+
+function fetchUrl(urlStr) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(urlStr);
+    const options = {
+      hostname: parsed.hostname,
+      path: parsed.pathname + parsed.search,
+      method: 'GET',
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    };
+    https.get(options, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(data));
+    }).on('error', reject);
   });
 }
 
@@ -49,20 +68,31 @@ http.createServer(async (req, res) => {
 
   const parsed = url.parse(req.url, true);
 
-  if (parsed.pathname === '/ebay') {
-    const query = new URLSearchParams(parsed.query).toString();
-    const ebayUrl = `https://svcs.ebay.com/services/search/FindingService/v1?${query}`;
-    https.get(ebayUrl, (ebayRes) => {
-      let data = '';
-      ebayRes.on('data', chunk => data += chunk);
-      ebayRes.on('end', () => {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(data);
+  if (parsed.pathname === '/rss') {
+    try {
+      const q = parsed.query.q || '';
+      const minPrice = parsed.query.minPrice || '';
+      const maxPrice = parsed.query.maxPrice || '';
+      const params = new URLSearchParams({
+        _nkw: q,
+        _sacat: '214',
+        _sop: '10',
+        _rss: '1'
       });
-    }).on('error', (e) => {
+      if (minPrice) params.set('_udlo', minPrice);
+      if (maxPrice) params.set('_udhi', maxPrice);
+      if (parsed.query.buyItNow === 'true') params.set('LH_BIN', '1');
+      if (parsed.query.auction === 'true') params.set('LH_Auction', '1');
+      if (parsed.query.loc === 'US') params.set('LH_PrefLoc', '1');
+      else if (parsed.query.loc === 'GB') params.set('LH_PrefLoc', '2');
+      const rssUrl = `https://www.ebay.com/sch/i.html?${params.toString()}`;
+      const xml = await fetchUrl(rssUrl);
+      res.writeHead(200, { 'Content-Type': 'application/xml' });
+      res.end(xml);
+    } catch(e) {
       res.writeHead(500);
       res.end(JSON.stringify({ error: e.message }));
-    });
+    }
 
   } else if (parsed.pathname === '/browse') {
     try {
@@ -103,7 +133,7 @@ http.createServer(async (req, res) => {
         res.writeHead(500);
         res.end(JSON.stringify({ error: e.message }));
       });
-    } catch (e) {
+    } catch(e) {
       res.writeHead(500);
       res.end(JSON.stringify({ error: e.message }));
     }
