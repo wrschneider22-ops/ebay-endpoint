@@ -64,4 +64,49 @@ http.createServer(async (req, res) => {
         filterParts.push(`priceCurrency:${query.currency || 'USD'}`);
       }
       if (query.buyingOptions) filterParts.push(`buyingOptions:{${query.buyingOptions}}`);
-      if (query.conditions) filterParts.push(`
+      if (query.conditions) filterParts.push(`conditions:{${query.conditions}}`);
+      if (query.itemLocationCountry) filterParts.push(`itemLocationCountry:${query.itemLocationCountry}`);
+      if (query.freeShipping === 'true') filterParts.push('maxDeliveryCost:0');
+      if (query.returnsAccepted === 'true') filterParts.push('returnsAccepted:true');
+      const params = new URLSearchParams({
+        q: query.q || '',
+        category_ids: '212',
+        sort: 'newlyListed',
+        limit: query.limit || '25',
+        filter: filterParts.join(',')
+      });
+      const ebayUrl = `https://api.ebay.com/buy/browse/v1/item_summary/search?${params}`;
+      https.get(ebayUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-EBAY-C-MARKETPLACE-ID': query.marketplace || 'EBAY_US',
+          'Content-Type': 'application/json'
+        }
+      }, (ebayRes) => {
+        let data = '';
+        ebayRes.on('data', chunk => data += chunk);
+        ebayRes.on('end', () => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(data);
+        });
+      }).on('error', (e) => {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: `eBay fetch failed: ${e.message}` }));
+      });
+    } catch(e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ error: e.message }));
+    }
+
+  } else if (parsed.query.challenge_code) {
+    const hash = crypto.createHash('sha256')
+      .update(parsed.query.challenge_code + VERIFICATION_TOKEN + ENDPOINT_URL)
+      .digest('hex');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ challengeResponse: hash }));
+
+  } else {
+    res.writeHead(200);
+    res.end('OK');
+  }
+}).listen(process.env.PORT || 3000);
